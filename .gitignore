@@ -1,0 +1,26 @@
+# Compiled Java class files & directories
+bin/
+*.class
+
+# Build artifacts, JARs, and installers
+dist/
+sources.txt
+*.jar
+lib/*.jar
+!lib/
+config.properties
+error.log
+.env
+
+# Local SQLite databases (not needed when using cloud DB)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# IDE & OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

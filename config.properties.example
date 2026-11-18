@@ -1,0 +1,4 @@
+# Local SQLite is the default. Do not commit credentials in this file.
+DB_TYPE=sqlite
+DB_USER=
+DB_PASSWORD=

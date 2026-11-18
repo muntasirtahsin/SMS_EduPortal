@@ -1,0 +1,47 @@
+name: Publish EduPortal release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Verify tag matches application version
+        shell: pwsh
+        run: |
+          $source = Get-Content "src/com/eduportal/utils/AutoUpdater.java" -Raw
+          if ($source -notmatch 'CURRENT_VERSION\s*=\s*"([^"]+)"') {
+            throw "Could not read CURRENT_VERSION from AutoUpdater.java."
+          }
+          if ($Matches[1] -ne $env:GITHUB_REF_NAME) {
+            throw "Release tag $env:GITHUB_REF_NAME does not match CURRENT_VERSION $($Matches[1])."
+          }
+
+      - name: Download dependencies
+        shell: pwsh
+        run: ./download_deps.ps1
+
+      - name: Build update package
+        shell: pwsh
+        run: ./prepare-launch4j.ps1
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/EduPortal/EduPortal-update.zip
