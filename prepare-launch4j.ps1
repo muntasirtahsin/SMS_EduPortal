@@ -171,20 +171,37 @@ try {
     if (Test-Path $updateZip) {
         Remove-Item $updateZip -Force
     }
+    $releaseRootPrefix = (Get-Item -LiteralPath $releaseStage).FullName.TrimEnd([char[]]@('\', '/')) +
+        [System.IO.Path]::DirectorySeparatorChar
     $archive = [System.IO.Compression.ZipFile]::Open(
         $updateZip,
         [System.IO.Compression.ZipArchiveMode]::Create
     )
     try {
         Get-ChildItem -LiteralPath $releaseStage -Recurse -File | ForEach-Object {
-            $relativePath = $_.FullName.Substring($releaseStage.Length)
-            $entryName = $relativePath.TrimStart([char[]]@('\', '/')).Replace('\', '/')
+            $fullPath = $_.FullName
+            if (-not $fullPath.StartsWith($releaseRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Release file is outside the staging directory: $fullPath"
+            }
+            $entryName = $fullPath.Substring($releaseRootPrefix.Length).Replace('\', '/')
             [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
                 $archive,
                 $_.FullName,
                 $entryName,
                 [System.IO.Compression.CompressionLevel]::Optimal
             ) | Out-Null
+        }
+    } finally {
+        $archive.Dispose()
+    }
+
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($updateZip)
+    try {
+        $entryNames = @($archive.Entries | ForEach-Object { $_.FullName })
+        foreach ($requiredEntry in @("EduPortal.jar", "lib/javafx-controls-21.0.2-win.jar", "runtime/bin/javaw.exe")) {
+            if (-not ($entryNames -ccontains $requiredEntry)) {
+                throw "Generated update ZIP is missing the required root entry: $requiredEntry"
+            }
         }
     } finally {
         $archive.Dispose()
