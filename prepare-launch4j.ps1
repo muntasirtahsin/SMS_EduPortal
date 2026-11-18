@@ -143,6 +143,7 @@ $launch4jConfig = @'
     <fileDescription>EduPortal Student Management System</fileDescription>
     <productVersion>1.0.0.0</productVersion>
     <txtProductVersion>1.0.0</txtProductVersion>
+    <copyright>Copyright 2026 EduPortal</copyright>
     <productName>EduPortal Student Management System</productName>
     <internalName>EduPortal</internalName>
     <originalFilename>EduPortal.exe</originalFilename>
