@@ -49,6 +49,23 @@ jobs:
         shell: pwsh
         run: ./download_deps.ps1
 
+      - name: Test release-feed parsing
+        shell: pwsh
+        run: |
+          $testClasses = Join-Path $env:RUNNER_TEMP "eduportal-tests"
+          New-Item -ItemType Directory -Force -Path $testClasses | Out-Null
+          $classpath = Join-Path $PWD "lib\*"
+          javac --release 17 -encoding UTF-8 -cp $classpath -d $testClasses `
+            src/com/eduportal/utils/AutoUpdater.java `
+            test/com/eduportal/utils/AutoUpdaterFeedTest.java
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release-feed regression tests failed to compile."
+          }
+          java -cp "$testClasses;$classpath" com.eduportal.utils.AutoUpdaterFeedTest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release-feed regression tests failed."
+          }
+
       - name: Build update package
         shell: pwsh
         env:

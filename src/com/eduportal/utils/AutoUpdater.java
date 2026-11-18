@@ -165,7 +165,7 @@ public final class AutoUpdater {
                 latestVersion, downloadUrl, null));
     }
 
-    private static String latestReleaseTagFromFeed(String feed) throws IOException {
+    static String latestReleaseTagFromFeed(String feed) throws IOException {
         Matcher release = Pattern.compile("<entry\\b[^>]*>(.*?)</entry>", Pattern.DOTALL).matcher(feed);
         if (!release.find()) throw new IOException("The GitHub release feed contains no published releases.");
         Matcher tag = Pattern.compile("<link\\b[^>]*\\bhref=\"[^\"]*/releases/tag/([^\"/?#]+)\"[^>]*/?>")
