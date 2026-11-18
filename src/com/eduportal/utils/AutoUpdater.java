@@ -391,20 +391,65 @@ public final class AutoUpdater {
     }
 
     private static ReleaseAsset findUpdateAsset(String json) {
-        Matcher assets = Pattern.compile("\"assets\"\\s*:\\s*\\[(.*?)]", Pattern.DOTALL).matcher(json);
+        Matcher assets = Pattern.compile("\"assets\"\\s*:\\s*\\[").matcher(json);
         if (!assets.find()) return null;
-        Matcher objects = Pattern.compile("\\{([^{}]*)}", Pattern.DOTALL).matcher(assets.group(1));
+        int arrayStart = json.indexOf('[', assets.start());
+        int arrayEnd = matchingJsonDelimiter(json, arrayStart, '[', ']');
+        if (arrayEnd < 0) return null;
+
         ReleaseAsset fallback = null;
-        while (objects.find()) {
-            String asset = objects.group(1);
+        int index = arrayStart + 1;
+        while (index < arrayEnd) {
+            char current = json.charAt(index);
+            if (Character.isWhitespace(current) || current == ',') {
+                index++;
+                continue;
+            }
+            if (current != '{') {
+                index++;
+                continue;
+            }
+
+            int objectEnd = matchingJsonDelimiter(json, index, '{', '}');
+            if (objectEnd < 0 || objectEnd > arrayEnd) return null;
+            String asset = json.substring(index, objectEnd + 1);
             String name = jsonStringField(asset, "name");
             String downloadUrl = jsonStringField(asset, "browser_download_url");
-            if (name == null || downloadUrl == null || !name.toLowerCase(Locale.ROOT).endsWith(".zip")) continue;
-            ReleaseAsset candidate = new ReleaseAsset(downloadUrl, jsonStringField(asset, "digest"));
-            if ("eduportal-update.zip".equalsIgnoreCase(name)) return candidate;
-            if (name.toLowerCase(Locale.ROOT).contains("eduportal")) fallback = candidate;
+            if (name != null && downloadUrl != null && name.toLowerCase(Locale.ROOT).endsWith(".zip")) {
+                ReleaseAsset candidate = new ReleaseAsset(downloadUrl, jsonStringField(asset, "digest"));
+                if ("eduportal-update.zip".equalsIgnoreCase(name)) return candidate;
+                if (name.toLowerCase(Locale.ROOT).contains("eduportal")) fallback = candidate;
+            }
+            index = objectEnd + 1;
         }
         return fallback;
+    }
+
+    private static int matchingJsonDelimiter(String json, int start, char opening, char closing) {
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = start; i < json.length(); i++) {
+            char current = json.charAt(i);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (current == '\\') {
+                    escaped = true;
+                } else if (current == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (current == '"') {
+                inString = true;
+            } else if (current == opening) {
+                depth++;
+            } else if (current == closing && --depth == 0) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static String jsonStringField(String json, String fieldName) {
