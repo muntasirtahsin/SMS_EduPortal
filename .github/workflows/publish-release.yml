@@ -1,12 +1,14 @@
 name: Publish EduPortal release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: eduportal-release
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
@@ -14,6 +16,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -21,16 +25,25 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Verify tag matches application version
+      - name: Choose next patch version
+        id: version
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $source = Get-Content "src/com/eduportal/utils/AutoUpdater.java" -Raw
-          if ($source -notmatch 'CURRENT_VERSION\s*=\s*"([^"]+)"') {
-            throw "Could not read CURRENT_VERSION from AutoUpdater.java."
+          $headers = @{
+            Accept = "application/vnd.github+json"
+            Authorization = "Bearer $env:GH_TOKEN"
+            "X-GitHub-Api-Version" = "2022-11-28"
           }
-          if ($Matches[1] -ne $env:GITHUB_REF_NAME) {
-            throw "Release tag $env:GITHUB_REF_NAME does not match CURRENT_VERSION $($Matches[1])."
+          $releaseUrl = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/latest"
+          $latest = Invoke-RestMethod -Uri $releaseUrl -Headers $headers
+          if ($latest.tag_name -notmatch '^v(\d+)\.(\d+)\.(\d+)$') {
+            throw "Latest release tag must use vMAJOR.MINOR.PATCH format."
           }
+          $version = "v$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Publishing $version"
 
       - name: Download dependencies
         shell: pwsh
@@ -38,10 +51,14 @@ jobs:
 
       - name: Build update package
         shell: pwsh
-        run: ./prepare-launch4j.ps1
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: ./prepare-launch4j.ps1 -Version $env:RELEASE_VERSION
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: EduPortal ${{ steps.version.outputs.version }}
           generate_release_notes: true
           files: dist/EduPortal/EduPortal-update.zip

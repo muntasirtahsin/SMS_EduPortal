@@ -1,4 +1,13 @@
+param(
+    [ValidatePattern('^[vV]?\d+(\.\d+){1,3}$')]
+    [string]$Version = "v1.0.0"
+)
+
 $ErrorActionPreference = "Stop"
+$Version = $Version.Trim()
+if (-not $Version.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $Version = "v" + $Version
+}
 
 $projectRoot = $PSScriptRoot
 $jdkLinker = Get-Command jlink -ErrorAction SilentlyContinue
@@ -38,6 +47,8 @@ try {
 } finally {
     Pop-Location
 }
+
+Set-Content -Path (Join-Path $bin "version.properties") -Value ("version=" + $Version) -Encoding ASCII
 
 foreach ($resource in @("style.css", "eduportal.png")) {
     $resourcePath = Join-Path $projectRoot "src\$resource"

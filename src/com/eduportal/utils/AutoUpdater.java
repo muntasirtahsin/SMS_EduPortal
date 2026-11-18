@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.Locale;
+import java.util.Properties;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -21,12 +22,28 @@ import java.util.zip.ZipInputStream;
 
 public final class AutoUpdater {
 
-    public static final String CURRENT_VERSION = "v1.0.0";
+    public static final String CURRENT_VERSION = loadCurrentVersion();
     private static final String GITHUB_REPO = "muntasirtahsin/SMS_EduPortal";
     private static final String RELEASES_API = "https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest";
     private static final long MAX_UPDATE_SIZE = 1024L * 1024L * 1024L;
 
     private AutoUpdater() {}
+
+    private static String loadCurrentVersion() {
+        String fallback = "v1.0.0";
+        try (InputStream input = AutoUpdater.class.getResourceAsStream("/version.properties")) {
+            if (input == null) return fallback;
+            Properties properties = new Properties();
+            properties.load(input);
+            String version = properties.getProperty("version", fallback).trim();
+            if (!version.matches("[vV]?\\d+(\\.\\d+){1,3}")) {
+                throw new IllegalStateException("Invalid application version in version.properties.");
+            }
+            return version.startsWith("v") ? version : "v" + version;
+        } catch (IOException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+    }
 
     public enum State {
         CHECKING,
