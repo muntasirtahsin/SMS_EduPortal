@@ -13,6 +13,9 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        string appDirectory = null;
+        string dataDirectory = null;
+        bool applicationExited = false;
         try
         {
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -21,43 +24,20 @@ internal static class Program
                 throw new InvalidOperationException("Windows Local AppData is unavailable.");
             }
 
-            string dataDirectory = Path.Combine(localAppData, "EduPortal");
-            string appDirectory = Path.Combine(dataDirectory, "app");
-            using (Mutex mutex = new Mutex(false, "Local\\EduPortalBootstrap"))
-            {
-                bool acquired;
-                try
-                {
-                    acquired = mutex.WaitOne(TimeSpan.FromMinutes(2));
-                }
-                catch (AbandonedMutexException)
-                {
-                    acquired = true;
-                }
-
-                if (!acquired)
-                {
-                    throw new TimeoutException("Another EduPortal setup is still running.");
-                }
-
-                try
-                {
-                    if (!IsPayloadReady(appDirectory))
-                    {
-                        InstallPayload(dataDirectory, appDirectory);
-                    }
-                }
-                finally
-                {
-                    mutex.ReleaseMutex();
-                }
-            }
+            dataDirectory = Path.Combine(localAppData, "EduPortal");
+            Directory.CreateDirectory(dataDirectory);
+            PreserveLegacyUserFiles(dataDirectory);
+            appDirectory = Path.Combine(Path.GetTempPath(), "EduPortal-" + Guid.NewGuid().ToString("N"));
+            string controlPath = Path.Combine(appDirectory, "launcher-control.txt");
+            string updateMarker = controlPath + ".updating";
+            InstallPayload(appDirectory);
 
             if (!IsPayloadReady(appDirectory))
             {
-                throw new InvalidOperationException("The bundled EduPortal files could not be installed.");
+                throw new InvalidOperationException("The bundled EduPortal files could not be extracted.");
             }
 
+            File.WriteAllText(controlPath, "STARTING");
             ProcessStartInfo startInfo = new ProcessStartInfo();
             startInfo.FileName = Path.Combine(appDirectory, "runtime", "bin", "javaw.exe");
             startInfo.WorkingDirectory = appDirectory;
@@ -67,12 +47,20 @@ internal static class Program
                 "-cp \"EduPortal.jar;lib/*\" com.eduportal.Main";
             startInfo.UseShellExecute = false;
             startInfo.CreateNoWindow = true;
+            startInfo.EnvironmentVariables["EDUPORTAL_DATA_DIR"] = dataDirectory;
+            startInfo.EnvironmentVariables["EDUPORTAL_LAUNCHER_CONTROL"] = controlPath;
             using (Process process = Process.Start(startInfo))
             {
                 if (process == null)
                 {
                     throw new InvalidOperationException("The bundled Java runtime could not be started.");
                 }
+                if (!File.Exists(updateMarker))
+                {
+                    File.WriteAllText(controlPath, process.Id.ToString());
+                }
+                WaitForApplicationExit(process.Id, controlPath, updateMarker);
+                applicationExited = true;
             }
         }
         catch (Exception exception)
@@ -82,6 +70,28 @@ internal static class Program
                 "EduPortal",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+        }
+        finally
+        {
+            if (appDirectory != null && Directory.Exists(appDirectory))
+            {
+                try
+                {
+                    Directory.Delete(appDirectory, true);
+                }
+                catch (IOException exception)
+                {
+                    ShowCleanupWarning(appDirectory, exception);
+                }
+                catch (UnauthorizedAccessException exception)
+                {
+                    ShowCleanupWarning(appDirectory, exception);
+                }
+            }
+            if (applicationExited && dataDirectory != null)
+            {
+                RemoveLegacyApplicationFiles(dataDirectory);
+            }
         }
     }
 
@@ -93,10 +103,9 @@ internal static class Program
             && File.Exists(Path.Combine(directory, "lib", "sqlite-jdbc.jar"));
     }
 
-    private static void InstallPayload(string dataDirectory, string appDirectory)
+    private static void InstallPayload(string appDirectory)
     {
-        Directory.CreateDirectory(dataDirectory);
-        string stagingDirectory = Path.Combine(dataDirectory, "staging-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(appDirectory);
         string archivePath = Path.Combine(Path.GetTempPath(), "EduPortal-" + Guid.NewGuid().ToString("N") + ".zip");
 
         try
@@ -113,21 +122,14 @@ internal static class Program
                 }
             }
 
-            Directory.CreateDirectory(stagingDirectory);
-            ZipFile.ExtractToDirectory(archivePath, stagingDirectory);
-            if (!IsPayloadReady(stagingDirectory))
+            ZipFile.ExtractToDirectory(archivePath, appDirectory);
+            if (!IsPayloadReady(appDirectory))
             {
                 throw new InvalidDataException("The embedded EduPortal package is incomplete.");
             }
-
-            CopyDirectory(stagingDirectory, appDirectory);
         }
         finally
         {
-            if (Directory.Exists(stagingDirectory))
-            {
-                Directory.Delete(stagingDirectory, true);
-            }
             if (File.Exists(archivePath))
             {
                 File.Delete(archivePath);
@@ -135,16 +137,100 @@ internal static class Program
         }
     }
 
-    private static void CopyDirectory(string source, string destination)
+    private static void PreserveLegacyUserFiles(string dataDirectory)
     {
-        Directory.CreateDirectory(destination);
-        foreach (string file in Directory.GetFiles(source))
+        string legacyDirectory = Path.Combine(dataDirectory, "app");
+        foreach (string fileName in new[] { ".env", "config.properties" })
         {
-            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), true);
+            string legacyFile = Path.Combine(legacyDirectory, fileName);
+            string persistentFile = Path.Combine(dataDirectory, fileName);
+            if (File.Exists(legacyFile) && !File.Exists(persistentFile))
+            {
+                File.Copy(legacyFile, persistentFile);
+            }
         }
-        foreach (string directory in Directory.GetDirectories(source))
+    }
+
+    private static void RemoveLegacyApplicationFiles(string dataDirectory)
+    {
+        string legacyDirectory = Path.Combine(dataDirectory, "app");
+        if (!Directory.Exists(legacyDirectory))
         {
-            CopyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
+            return;
         }
+        try
+        {
+            Directory.Delete(legacyDirectory, true);
+        }
+        catch (IOException exception)
+        {
+            ShowCleanupWarning(legacyDirectory, exception);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            ShowCleanupWarning(legacyDirectory, exception);
+        }
+    }
+
+    private static void WaitForApplicationExit(int initialProcessId, string controlPath, string updateMarker)
+    {
+        int processId = initialProcessId;
+        while (true)
+        {
+            WaitForProcessExit(processId);
+            DateTime updateDeadline = DateTime.UtcNow.AddMinutes(2);
+            while (File.Exists(updateMarker))
+            {
+                string pendingControlValue = File.Exists(controlPath) ? File.ReadAllText(controlPath).Trim() : "";
+                int restartedProcessId;
+                if (Int32.TryParse(pendingControlValue, out restartedProcessId) && restartedProcessId != processId)
+                {
+                    processId = restartedProcessId;
+                    break;
+                }
+                if (DateTime.UtcNow >= updateDeadline)
+                {
+                    throw new TimeoutException("The updater did not finish restarting EduPortal.");
+                }
+                Thread.Sleep(250);
+            }
+
+            string controlValue = File.Exists(controlPath) ? File.ReadAllText(controlPath).Trim() : "";
+            int nextProcessId;
+            if (Int32.TryParse(controlValue, out nextProcessId) && nextProcessId != processId)
+            {
+                processId = nextProcessId;
+                continue;
+            }
+            if (File.Exists(updateMarker))
+            {
+                continue;
+            }
+            return;
+        }
+    }
+
+    private static void WaitForProcessExit(int processId)
+    {
+        try
+        {
+            using (Process process = Process.GetProcessById(processId))
+            {
+                process.WaitForExit();
+            }
+        }
+        catch (ArgumentException)
+        {
+        }
+    }
+
+    private static void ShowCleanupWarning(string appDirectory, Exception exception)
+    {
+        MessageBox.Show(
+            "EduPortal closed, but temporary runtime files could not be removed from:\n"
+                + appDirectory + "\n\n" + exception.Message,
+            "EduPortal cleanup",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Warning);
     }
 }

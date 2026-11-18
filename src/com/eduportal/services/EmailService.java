@@ -3,8 +3,13 @@ package com.eduportal.services;
 import javax.mail.*;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeMessage;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 public class EmailService {
@@ -13,30 +18,48 @@ public class EmailService {
         String val = System.getenv(key);
         if (val != null && !val.trim().isEmpty()) return val.trim();
 
-        // Try reading .env file if available
-        try {
-            File envFile = new File(".env");
-            if (!envFile.exists()) envFile = new File("../web/.env");
-            if (envFile.exists()) {
-                try (var fis = new FileInputStream(envFile);
-                     var br = new java.io.BufferedReader(new java.io.InputStreamReader(fis))) {
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        if (line.startsWith(key + "=")) {
-                            return line.substring(key.length() + 1).trim();
-                        }
+        for (File envFile : getCredentialFiles()) {
+            if (!envFile.isFile()) continue;
+            try (FileInputStream fis = new FileInputStream(envFile);
+                 BufferedReader br = new BufferedReader(new InputStreamReader(fis))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    if (line.startsWith(key + "=")) {
+                        return line.substring(key.length() + 1).trim();
                     }
                 }
+            } catch (IOException e) {
+                System.err.println("[EmailService] Could not read credentials from " + envFile + ": " + e.getMessage());
             }
-        } catch (Exception ignored) {}
+        }
         return fallback;
     }
 
     public static boolean hasCustomCredentials() {
-        File envFile = new File(".env");
-        if (envFile.exists()) return true;
-        File envFile2 = new File("../web/.env");
-        return envFile2.exists();
+        for (File envFile : getCredentialFiles()) {
+            if (envFile.isFile()) return true;
+        }
+        return false;
+    }
+
+    public static File getCredentialsFile() {
+        String dataDirectory = System.getenv("EDUPORTAL_DATA_DIR");
+        if (dataDirectory != null && !dataDirectory.trim().isEmpty()) {
+            return new File(dataDirectory, ".env");
+        }
+        return new File(".env");
+    }
+
+    private static File[] getCredentialFiles() {
+        List<File> files = new ArrayList<>();
+        String dataDirectory = System.getenv("EDUPORTAL_DATA_DIR");
+        if (dataDirectory != null && !dataDirectory.trim().isEmpty()) {
+            files.add(new File(dataDirectory, ".env"));
+            files.add(new File(new File(dataDirectory, "app"), ".env"));
+        }
+        files.add(new File(".env"));
+        files.add(new File("../web/.env"));
+        return files.toArray(new File[0]);
     }
 
     public static String getSystemSenderEmail() {
@@ -48,21 +71,13 @@ public class EmailService {
     }
 
     public static boolean removeMailCredentials() {
-        try {
-            boolean removed = false;
-            File envFile = new File(".env");
-            if (envFile.exists()) {
-                removed = envFile.delete();
+        boolean removedAll = true;
+        for (File envFile : getCredentialFiles()) {
+            if (envFile.exists() && !envFile.delete()) {
+                removedAll = false;
             }
-            File envFile2 = new File("../web/.env");
-            if (envFile2.exists()) {
-                removed = envFile2.delete() || removed;
-            }
-            return removed || !envFile.exists();
-        } catch (Exception e) {
-            System.err.println("[EmailService] Error removing credentials: " + e.getMessage());
-            return false;
         }
+        return removedAll;
     }
 
     public static boolean sendOtpEmail(String recipientEmail, String otpCode) {

@@ -342,33 +342,45 @@ public final class AutoUpdater {
     private static void launchInstallerHelper(Path appDirectory, Path stageDirectory, Path updateZip)
             throws IOException {
         Path helper = Files.createTempFile("eduportal-update-", ".ps1");
+        String controlPath = System.getenv("EDUPORTAL_LAUNCHER_CONTROL");
+        String updateMarker = controlPath == null || controlPath.isBlank() ? "" : controlPath + ".updating";
         String script = "$ErrorActionPreference = 'Stop'\n"
                 + "$processId = " + ProcessHandle.current().pid() + "\n"
                 + "$app = " + psQuote(appDirectory.toString()) + "\n"
                 + "$stage = " + psQuote(stageDirectory.toString()) + "\n"
                 + "$archive = " + psQuote(updateZip.toString()) + "\n"
+                + "$control = " + psQuote(controlPath == null ? "" : controlPath) + "\n"
+                + "$updateMarker = " + psQuote(updateMarker) + "\n"
+                + "$newProcess = $null\n"
                 + "try {\n"
                 + "  while (Get-Process -Id $processId -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 1 }\n"
                 + "  Get-ChildItem -LiteralPath $stage -Force | ForEach-Object {\n"
                 + "    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $app $_.Name) -Recurse -Force\n"
                 + "  }\n"
                 + "  $java = Join-Path $app 'runtime\\bin\\javaw.exe'\n"
-                + "  Start-Process -FilePath $java -WorkingDirectory $app -ArgumentList @('--module-path=lib',"
+                + "  $newProcess = Start-Process -FilePath $java -WorkingDirectory $app -PassThru -ArgumentList @('--module-path=lib',"
                 + "'--add-modules=javafx.controls,javafx.fxml,javafx.graphics',"
                 + "'--enable-native-access=ALL-UNNAMED','-cp','EduPortal.jar;lib/*','com.eduportal.Main')\n"
+                + "  if ($control) { Set-Content -LiteralPath $control -Value $newProcess.Id }\n"
                 + "} catch {\n"
+                + "  if ($newProcess) { Stop-Process -Id $newProcess.Id -Force -ErrorAction SilentlyContinue }\n"
                 + "  Add-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'EduPortal\\update-error.log')"
                 + " -Value ((Get-Date).ToString('s') + ' ' + $_.Exception.Message)\n"
                 + "} finally {\n"
+                + "  if ($updateMarker) { Remove-Item -LiteralPath $updateMarker -Force -ErrorAction SilentlyContinue }\n"
                 + "  Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue\n"
                 + "  Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue\n"
                 + "  Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\n"
                 + "}\n";
-        Files.writeString(helper, script, StandardCharsets.UTF_8);
         try {
+            if (!updateMarker.isEmpty()) {
+                Files.writeString(Path.of(updateMarker), "pending", StandardCharsets.UTF_8);
+            }
+            Files.writeString(helper, script, StandardCharsets.UTF_8);
             new ProcessBuilder("powershell.exe", "-WindowStyle", "Hidden", "-NoProfile", "-ExecutionPolicy", "Bypass",
                     "-File", helper.toString()).start();
         } catch (IOException e) {
+            if (!updateMarker.isEmpty()) Files.deleteIfExists(Path.of(updateMarker));
             Files.deleteIfExists(helper);
             throw new IOException("Could not start the update installer helper.", e);
         }

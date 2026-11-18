@@ -39,6 +39,13 @@ public class DatabaseConnection {
 
     private static void loadConfig() {
         File cfg = new File("config.properties");
+        String dataDirectory = System.getenv("EDUPORTAL_DATA_DIR");
+        if (dataDirectory != null && !dataDirectory.trim().isEmpty()) {
+            File persistentConfig = new File(dataDirectory, "config.properties");
+            if (persistentConfig.isFile()) {
+                cfg = persistentConfig;
+            }
+        }
         if (cfg.exists()) {
             try (FileInputStream fis = new FileInputStream(cfg)) {
                 Properties props = new Properties();

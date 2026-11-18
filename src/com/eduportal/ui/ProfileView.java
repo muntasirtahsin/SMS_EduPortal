@@ -361,7 +361,11 @@ public class ProfileView extends VBox {
             }
 
             try {
-                File envFile = new File(".env");
+                File envFile = EmailService.getCredentialsFile();
+                File envDirectory = envFile.getParentFile();
+                if (envDirectory != null && !envDirectory.exists() && !envDirectory.mkdirs()) {
+                    throw new java.io.IOException("Could not create the EduPortal data folder.");
+                }
                 try (OutputStream os = new FileOutputStream(envFile)) {
                     String content = "# EduPortal Credentials\nGMAIL_USER=" + mail + "\nGMAIL_PASS=" + pass + "\n";
                     os.write(content.getBytes());
