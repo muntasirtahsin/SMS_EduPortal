@@ -182,4 +182,4 @@ try {
 
 Write-Host "Launch4j package prepared at: $dist"
 Write-Host "Release ZIP for GitHub: $updateZip"
-Write-Host "Open dist\EduPortal\launch4j.xml in Launch4j and click Build wrapper."
+Write-Host "Run build-standalone.ps1 to create the single-file EduPortal.exe."
