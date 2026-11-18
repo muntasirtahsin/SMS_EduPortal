@@ -148,10 +148,7 @@ public final class AutoUpdater {
             connection.disconnect();
         }
 
-        Matcher release = Pattern.compile("<entry\\b[^>]*>.*?<title>([^<]+)</title>", Pattern.DOTALL)
-                .matcher(feed);
-        if (!release.find()) throw new IOException("The GitHub release feed contains no published releases.");
-        String latestVersion = release.group(1).trim();
+        String latestVersion = latestReleaseTagFromFeed(feed);
         if (versionCompare(latestVersion, CURRENT_VERSION) == null) {
             throw new IOException("The latest GitHub release has an invalid version tag.");
         }
@@ -166,6 +163,15 @@ public final class AutoUpdater {
         publish(listener, status(State.UPDATE_AVAILABLE,
                 "Version " + latestVersion + " is required before you can sign in.",
                 latestVersion, downloadUrl, null));
+    }
+
+    private static String latestReleaseTagFromFeed(String feed) throws IOException {
+        Matcher release = Pattern.compile("<entry\\b[^>]*>(.*?)</entry>", Pattern.DOTALL).matcher(feed);
+        if (!release.find()) throw new IOException("The GitHub release feed contains no published releases.");
+        Matcher tag = Pattern.compile("<link\\b[^>]*\\bhref=\"[^\"]*/releases/tag/([^\"/?#]+)\"[^>]*/?>")
+                .matcher(release.group(1));
+        if (!tag.find()) throw new IOException("The latest GitHub release feed entry has no release tag.");
+        return tag.group(1);
     }
 
     private static String readResponse(HttpURLConnection connection) throws IOException {
