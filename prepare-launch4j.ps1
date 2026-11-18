@@ -121,7 +121,7 @@ if (-not (Test-Path $runtime)) {
 $launch4jConfig = @'
 <launch4jConfig>
   <headerType>gui</headerType>
-  <outfile>EduPortal.exe</outfile>
+  <outfile>SMS-EduPortal.exe</outfile>
   <jar>EduPortal.jar</jar>
   <icon>eduportal.ico</icon>
   <chdir>.</chdir>
@@ -146,7 +146,7 @@ $launch4jConfig = @'
     <copyright>Copyright 2026 EduPortal</copyright>
     <productName>EduPortal Student Management System</productName>
     <internalName>EduPortal</internalName>
-    <originalFilename>EduPortal.exe</originalFilename>
+    <originalFilename>SMS-EduPortal.exe</originalFilename>
     <language>ENGLISH_US</language>
   </versionInfo>
 </launch4jConfig>
@@ -166,20 +166,33 @@ try {
     }
     Copy-Item $runtime $releaseStage -Recurse
 
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     if (Test-Path $updateZip) {
         Remove-Item $updateZip -Force
     }
-    [System.IO.Compression.ZipFile]::CreateFromDirectory(
-        $releaseStage,
+    $archive = [System.IO.Compression.ZipFile]::Open(
         $updateZip,
-        [System.IO.Compression.CompressionLevel]::Optimal,
-        $false
+        [System.IO.Compression.ZipArchiveMode]::Create
     )
+    try {
+        Get-ChildItem -LiteralPath $releaseStage -Recurse -File | ForEach-Object {
+            $relativePath = $_.FullName.Substring($releaseStage.Length)
+            $entryName = $relativePath.TrimStart([char[]]@('\', '/')).Replace('\', '/')
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $archive,
+                $_.FullName,
+                $entryName,
+                [System.IO.Compression.CompressionLevel]::Optimal
+            ) | Out-Null
+        }
+    } finally {
+        $archive.Dispose()
+    }
 } finally {
     Remove-Item $releaseStage -Recurse -Force
 }
 
 Write-Host "Launch4j package prepared at: $dist"
 Write-Host "Release ZIP for GitHub: $updateZip"
-Write-Host "Run build-standalone.ps1 to create the single-file EduPortal.exe."
+Write-Host "Run build-standalone.ps1 to create SMS-EduPortal.exe and its Windows ZIP."
