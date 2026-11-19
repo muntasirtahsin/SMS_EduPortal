@@ -143,7 +143,8 @@ internal static class Program
         return File.Exists(Path.Combine(directory, "EduPortal.jar"))
             && File.Exists(Path.Combine(directory, "runtime", "bin", "javaw.exe"))
             && File.Exists(Path.Combine(directory, "lib", "javafx-controls-21.0.2-win.jar"))
-            && File.Exists(Path.Combine(directory, "lib", "sqlite-jdbc.jar"));
+            && File.Exists(Path.Combine(directory, "lib", "sqlite-jdbc.jar"))
+            && File.Exists(Path.Combine(directory, "lib", "slf4j-api-1.7.36.jar"));
     }
 
     private static void InstallPayload(string appDirectory)

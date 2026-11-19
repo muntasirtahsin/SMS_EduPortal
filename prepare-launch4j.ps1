@@ -72,6 +72,7 @@ $requiredLibraries = @(
     "javax.mail-1.6.2.jar",
     "postgresql-42.7.2.jar",
     "sqlite-jdbc.jar",
+    "slf4j-api-1.7.36.jar",
     "javafx-base-21.0.2-win.jar",
     "javafx-controls-21.0.2-win.jar",
     "javafx-fxml-21.0.2-win.jar",
@@ -124,6 +125,12 @@ if (-not (Test-Path $bundledJava)) {
 $runtimeModules = & $bundledJava --list-modules
 if ($LASTEXITCODE -ne 0 -or -not ($runtimeModules -match '^java\.sql\.rowset@')) {
     throw "Bundled Java runtime must include java.sql.rowset for the SQLite JDBC driver."
+}
+$sqliteModuleCheck = & $bundledJava "--module-path=$(Join-Path $dist 'lib')" `
+    "--add-modules=org.xerial.sqlitejdbc" --validate-modules 2>&1
+if ($LASTEXITCODE -ne 0) {
+    $moduleCheckDetails = $sqliteModuleCheck -join [Environment]::NewLine
+    throw "Bundled SQLite JDBC module dependencies could not be resolved: $moduleCheckDetails"
 }
 
 $launch4jConfig = @'
