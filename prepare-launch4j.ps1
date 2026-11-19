@@ -111,11 +111,19 @@ if (-not (Test-Path $runtime)) {
         (Join-Path $dist "lib\javafx-fxml-21.0.2-win.jar")
     ) -join ";"
     & $jlink --module-path $modulePath `
-        --add-modules javafx.controls,javafx.fxml,java.sql,java.desktop,java.naming,java.logging,java.security.sasl,jdk.crypto.ec `
+        --add-modules javafx.controls,javafx.fxml,java.sql,java.sql.rowset,java.desktop,java.naming,java.logging,java.security.sasl,jdk.crypto.ec `
         --strip-debug --no-header-files --no-man-pages --output $runtime
     if ($LASTEXITCODE -ne 0) {
         throw "Bundled Java runtime creation failed with exit code $LASTEXITCODE."
     }
+}
+$bundledJava = Join-Path $runtime "bin\java.exe"
+if (-not (Test-Path $bundledJava)) {
+    throw "Bundled Java runtime is missing: $bundledJava"
+}
+$runtimeModules = & $bundledJava --list-modules
+if ($LASTEXITCODE -ne 0 -or -not ($runtimeModules -match '^java\.sql\.rowset@')) {
+    throw "Bundled Java runtime must include java.sql.rowset for the SQLite JDBC driver."
 }
 
 $launch4jConfig = @'
@@ -134,7 +142,7 @@ $launch4jConfig = @'
     <minVersion>17</minVersion>
     <bundledJre64Bit>true</bundledJre64Bit>
     <opt>--module-path=lib</opt>
-    <opt>--add-modules=javafx.controls,javafx.fxml,javafx.graphics</opt>
+    <opt>--add-modules=javafx.controls,javafx.fxml,javafx.graphics,java.sql.rowset</opt>
     <opt>--enable-native-access=ALL-UNNAMED</opt>
   </jre>
   <versionInfo>

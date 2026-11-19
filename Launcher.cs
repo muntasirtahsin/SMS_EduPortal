@@ -44,7 +44,7 @@ internal static class Program
             startInfo.FileName = Path.Combine(appDirectory, "runtime", "bin", "javaw.exe");
             startInfo.WorkingDirectory = appDirectory;
             startInfo.Arguments = "--module-path=lib " +
-                "--add-modules=javafx.controls,javafx.fxml,javafx.graphics " +
+                "--add-modules=javafx.controls,javafx.fxml,javafx.graphics,java.sql.rowset " +
                 "--enable-native-access=ALL-UNNAMED " +
                 "-cp \"EduPortal.jar;lib/*\" com.eduportal.Main";
             startInfo.UseShellExecute = false;
