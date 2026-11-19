@@ -10,10 +10,7 @@ import javafx.scene.image.Image;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 
-import java.io.IOException;
 import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Path;
 
 public class MainApp extends Application {
 
@@ -71,18 +68,7 @@ public class MainApp extends Application {
         applyTheme();
         primaryStage.setScene(mainScene);
         primaryStage.show();
-        signalUpdatedStartupReady();
         AutoUpdater.checkForUpdatesAsync(loginView::setUpdateStatus);
-    }
-
-    private void signalUpdatedStartupReady() {
-        String readyFile = System.getenv("EDUPORTAL_UPDATE_READY_FILE");
-        if (readyFile == null || readyFile.isBlank()) return;
-        try {
-            Files.writeString(Path.of(readyFile), "ready");
-        } catch (IOException e) {
-            Main.logError("Could not confirm updated application startup", e);
-        }
     }
 
     public void showMainLayout() {
