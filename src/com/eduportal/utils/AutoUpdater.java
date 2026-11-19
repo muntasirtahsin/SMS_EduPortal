@@ -17,8 +17,6 @@ import java.util.Properties;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 public final class AutoUpdater {
 
@@ -159,7 +157,7 @@ public final class AutoUpdater {
         }
 
         String downloadUrl = "https://github.com/" + GITHUB_REPO + "/releases/download/"
-                + latestVersion + "/EduPortal-update.zip";
+                + latestVersion + "/SMS-EduPortal.exe";
         publish(listener, status(State.UPDATE_AVAILABLE,
                 "Version " + latestVersion + " is required before you can sign in.",
                 latestVersion, downloadUrl, null));
@@ -184,8 +182,7 @@ public final class AutoUpdater {
         }
     }
 
-    public static void installUpdateAsync(UpdateStatus update, Path applicationDirectory,
-                                          Consumer<UpdateStatus> listener) {
+    public static void installUpdateAsync(UpdateStatus update, Consumer<UpdateStatus> listener) {
         if (update == null || update.state != State.UPDATE_AVAILABLE || update.downloadUrl == null) {
             publish(listener, status(State.UPDATE_BLOCKED,
                     "This release does not have a downloadable update package.", update == null ? null : update.latestVersion,
@@ -194,43 +191,41 @@ public final class AutoUpdater {
         }
 
         Thread installThread = new Thread(() -> {
-            Path stageDirectory = null;
-            Path updateZip = null;
+            Path stagedExecutable = null;
             try {
                 if (!System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows")) {
                     throw new IOException("Automatic installation is currently supported on Windows only.");
                 }
-                Path appDirectory = applicationDirectory.toAbsolutePath().normalize();
-                validateApplicationDirectory(appDirectory);
                 String localAppData = System.getenv("LOCALAPPDATA");
                 if (localAppData == null || localAppData.isBlank()) {
                     throw new IOException("The Windows local application data folder is unavailable.");
                 }
+                String controlPath = System.getenv("EDUPORTAL_LAUNCHER_CONTROL");
+                if (controlPath == null || controlPath.isBlank()) {
+                    throw new IOException("The self-updating launcher is unavailable. Download the latest SMS-EduPortal.exe manually.");
+                }
                 Path updateDirectory = Path.of(localAppData, "EduPortal", "updates");
                 Files.createDirectories(updateDirectory);
-                stageDirectory = Files.createTempDirectory(updateDirectory, "staging-");
-                updateZip = updateDirectory.resolve("EduPortal-update-" + System.currentTimeMillis() + ".zip");
+                stagedExecutable = Files.createTempFile(updateDirectory, "SMS-EduPortal-update-", ".exe");
 
                 publish(listener, status(State.DOWNLOADING, "Downloading " + update.latestVersion + "...",
                         update.latestVersion, update.downloadUrl, update.sha256));
-                download(update.downloadUrl, updateZip);
+                download(update.downloadUrl, stagedExecutable);
                 if (update.sha256 != null && !update.sha256.isEmpty()) {
-                    verifySha256(updateZip, update.sha256);
+                    verifySha256(stagedExecutable, update.sha256);
                 }
-
-                extractUpdate(updateZip, stageDirectory);
-                validateUpdatePackage(stageDirectory);
+                validateWindowsExecutable(stagedExecutable);
+                Files.writeString(Path.of(controlPath + ".exe-update"),
+                        stagedExecutable.toAbsolutePath().toString(), StandardCharsets.UTF_8);
                 publish(listener, status(State.INSTALLING, "Preparing the update. EduPortal will restart automatically...",
                         update.latestVersion, update.downloadUrl, update.sha256));
-                launchInstallerHelper(appDirectory, stageDirectory, updateZip);
                 Platform.runLater(() -> {
                     Platform.exit();
                     System.exit(0);
                 });
             } catch (Exception e) {
                 System.err.println("[AutoUpdater] Update installation failed: " + e.getMessage());
-                deleteTree(stageDirectory);
-                deleteFile(updateZip);
+                deleteFile(stagedExecutable);
                 publish(listener, status(State.UPDATE_AVAILABLE,
                         "Update failed: " + e.getMessage() + " Select Update Now to retry.",
                         update.latestVersion, update.downloadUrl, update.sha256));
@@ -238,6 +233,17 @@ public final class AutoUpdater {
         }, "eduportal-update-install");
         installThread.setDaemon(true);
         installThread.start();
+    }
+
+    private static void validateWindowsExecutable(Path executable) throws IOException {
+        if (Files.size(executable) < 1024 * 1024) {
+            throw new IOException("The downloaded update is too small to be a valid application.");
+        }
+        try (InputStream input = Files.newInputStream(executable)) {
+            if (input.read() != 'M' || input.read() != 'Z') {
+                throw new IOException("The downloaded update is not a valid Windows application.");
+            }
+        }
     }
 
     private static HttpURLConnection openConnection(URL url) throws IOException {
@@ -299,103 +305,6 @@ public final class AutoUpdater {
         }
     }
 
-    private static void extractUpdate(Path zipFile, Path destination) throws IOException {
-        try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(zipFile))) {
-            ZipEntry entry;
-            long totalBytes = 0;
-            byte[] buffer = new byte[16384];
-            while ((entry = zip.getNextEntry()) != null) {
-                Path output = destination.resolve(entry.getName()).normalize();
-                if (!output.startsWith(destination) || entry.getName().startsWith("/") || entry.getName().contains("\\")) {
-                    throw new IOException("The update package contains an invalid file path.");
-                }
-                if (entry.isDirectory()) {
-                    Files.createDirectories(output);
-                    continue;
-                }
-                Files.createDirectories(output.getParent());
-                try (java.io.OutputStream stream = Files.newOutputStream(output)) {
-                    int bytesRead;
-                    while ((bytesRead = zip.read(buffer)) != -1) {
-                        totalBytes += bytesRead;
-                        if (totalBytes > MAX_UPDATE_SIZE) {
-                            throw new IOException("The extracted update package is larger than 1 GB.");
-                        }
-                        stream.write(buffer, 0, bytesRead);
-                    }
-                }
-                zip.closeEntry();
-            }
-        }
-    }
-
-    private static void validateApplicationDirectory(Path directory) throws IOException {
-        if (!Files.isRegularFile(directory.resolve("EduPortal.jar"))
-                || !Files.isDirectory(directory.resolve("lib"))
-                || !Files.isRegularFile(directory.resolve("runtime").resolve("bin").resolve("javaw.exe"))) {
-            throw new IOException("Run EduPortal from its prepared distribution folder to install updates.");
-        }
-    }
-
-    private static void validateUpdatePackage(Path directory) throws IOException {
-        if (!Files.isRegularFile(directory.resolve("EduPortal.jar"))
-                || !Files.isDirectory(directory.resolve("lib"))
-                || !Files.isRegularFile(directory.resolve("runtime").resolve("bin").resolve("javaw.exe"))) {
-            throw new IOException("The release ZIP must contain EduPortal.jar, lib, and runtime at its root.");
-        }
-    }
-
-    private static void launchInstallerHelper(Path appDirectory, Path stageDirectory, Path updateZip)
-            throws IOException {
-        Path helper = Files.createTempFile("eduportal-update-", ".ps1");
-        String controlPath = System.getenv("EDUPORTAL_LAUNCHER_CONTROL");
-        String updateMarker = controlPath == null || controlPath.isBlank() ? "" : controlPath + ".updating";
-        String script = "$ErrorActionPreference = 'Stop'\n"
-                + "$processId = " + ProcessHandle.current().pid() + "\n"
-                + "$app = " + psQuote(appDirectory.toString()) + "\n"
-                + "$stage = " + psQuote(stageDirectory.toString()) + "\n"
-                + "$archive = " + psQuote(updateZip.toString()) + "\n"
-                + "$control = " + psQuote(controlPath == null ? "" : controlPath) + "\n"
-                + "$updateMarker = " + psQuote(updateMarker) + "\n"
-                + "$newProcess = $null\n"
-                + "try {\n"
-                + "  while (Get-Process -Id $processId -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 1 }\n"
-                + "  Get-ChildItem -LiteralPath $stage -Force | ForEach-Object {\n"
-                + "    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $app $_.Name) -Recurse -Force\n"
-                + "  }\n"
-                + "  $java = Join-Path $app 'runtime\\bin\\javaw.exe'\n"
-                + "  $newProcess = Start-Process -FilePath $java -WorkingDirectory $app -PassThru -ArgumentList @('--module-path=lib',"
-                + "'--add-modules=javafx.controls,javafx.fxml,javafx.graphics',"
-                + "'--enable-native-access=ALL-UNNAMED','-cp','EduPortal.jar;lib/*','com.eduportal.Main')\n"
-                + "  if ($control) { Set-Content -LiteralPath $control -Value $newProcess.Id }\n"
-                + "} catch {\n"
-                + "  if ($newProcess) { Stop-Process -Id $newProcess.Id -Force -ErrorAction SilentlyContinue }\n"
-                + "  Add-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'EduPortal\\update-error.log')"
-                + " -Value ((Get-Date).ToString('s') + ' ' + $_.Exception.Message)\n"
-                + "} finally {\n"
-                + "  if ($updateMarker) { Remove-Item -LiteralPath $updateMarker -Force -ErrorAction SilentlyContinue }\n"
-                + "  Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue\n"
-                + "  Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue\n"
-                + "  Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\n"
-                + "}\n";
-        try {
-            if (!updateMarker.isEmpty()) {
-                Files.writeString(Path.of(updateMarker), "pending", StandardCharsets.UTF_8);
-            }
-            Files.writeString(helper, script, StandardCharsets.UTF_8);
-            new ProcessBuilder("powershell.exe", "-WindowStyle", "Hidden", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                    "-File", helper.toString()).start();
-        } catch (IOException e) {
-            if (!updateMarker.isEmpty()) Files.deleteIfExists(Path.of(updateMarker));
-            Files.deleteIfExists(helper);
-            throw new IOException("Could not start the update installer helper.", e);
-        }
-    }
-
-    private static String psQuote(String value) {
-        return "'" + value.replace("'", "''") + "'";
-    }
-
     private static ReleaseAsset findUpdateAsset(String json) {
         Matcher assets = Pattern.compile("\"assets\"\\s*:\\s*\\[").matcher(json);
         if (!assets.find()) return null;
@@ -403,7 +312,6 @@ public final class AutoUpdater {
         int arrayEnd = matchingJsonDelimiter(json, arrayStart, '[', ']');
         if (arrayEnd < 0) return null;
 
-        ReleaseAsset fallback = null;
         int index = arrayStart + 1;
         while (index < arrayEnd) {
             char current = json.charAt(index);
@@ -421,14 +329,12 @@ public final class AutoUpdater {
             String asset = json.substring(index, objectEnd + 1);
             String name = jsonStringField(asset, "name");
             String downloadUrl = jsonStringField(asset, "browser_download_url");
-            if (name != null && downloadUrl != null && name.toLowerCase(Locale.ROOT).endsWith(".zip")) {
-                ReleaseAsset candidate = new ReleaseAsset(downloadUrl, jsonStringField(asset, "digest"));
-                if ("eduportal-update.zip".equalsIgnoreCase(name)) return candidate;
-                if (name.toLowerCase(Locale.ROOT).contains("eduportal")) fallback = candidate;
+            if (name != null && downloadUrl != null && "sms-eduportal.exe".equalsIgnoreCase(name)) {
+                return new ReleaseAsset(downloadUrl, jsonStringField(asset, "digest"));
             }
             index = objectEnd + 1;
         }
-        return fallback;
+        return null;
     }
 
     private static int matchingJsonDelimiter(String json, int start, char opening, char closing) {

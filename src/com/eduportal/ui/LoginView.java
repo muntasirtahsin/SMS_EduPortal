@@ -173,8 +173,7 @@ public class LoginView extends StackPane {
             updateActionBtn.setDisable(false);
             updateActionBtn.setOnAction(e -> {
                 updateActionBtn.setDisable(true);
-                AutoUpdater.installUpdateAsync(status,
-                        java.nio.file.Path.of(System.getProperty("user.dir")), this::setUpdateStatus);
+                AutoUpdater.installUpdateAsync(status, this::setUpdateStatus);
             });
             setUpdateActionVisible(true);
         } else if (status.getState() == AutoUpdater.State.UPDATE_BLOCKED

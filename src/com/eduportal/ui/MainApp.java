@@ -21,7 +21,8 @@ public class MainApp extends Application {
     public void start(Stage primaryStage) {
         try {
             this.primaryStage = primaryStage;
-            this.primaryStage.setTitle("EduPortal Student Management System " + AutoUpdater.CURRENT_VERSION);
+            this.primaryStage.setTitle("EduPortal Student Management System V"
+                    + AutoUpdater.CURRENT_VERSION.replaceFirst("^[vV]", ""));
             URL icon = getClass().getResource("/eduportal.png");
             if (icon == null) {
                 throw new IllegalStateException("Application icon resource /eduportal.png was not found.");

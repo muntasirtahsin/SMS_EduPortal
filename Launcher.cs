@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -30,6 +31,7 @@ internal static class Program
             appDirectory = Path.Combine(Path.GetTempPath(), "EduPortal-" + Guid.NewGuid().ToString("N"));
             string controlPath = Path.Combine(appDirectory, "launcher-control.txt");
             string updateMarker = controlPath + ".updating";
+            string executableUpdateMarker = controlPath + ".exe-update";
             InstallPayload(appDirectory);
 
             if (!IsPayloadReady(appDirectory))
@@ -61,6 +63,12 @@ internal static class Program
                 }
                 WaitForApplicationExit(process.Id, controlPath, updateMarker);
                 applicationExited = true;
+            }
+            if (File.Exists(executableUpdateMarker))
+            {
+                string stagedExecutable = File.ReadAllText(executableUpdateMarker).Trim();
+                ScheduleExecutableReplacement(stagedExecutable, dataDirectory);
+                File.Delete(executableUpdateMarker);
             }
         }
         catch (Exception exception)
@@ -222,6 +230,101 @@ internal static class Program
         catch (ArgumentException)
         {
         }
+    }
+
+    private static void ScheduleExecutableReplacement(string stagedExecutable, string dataDirectory)
+    {
+        string updateDirectory = Path.GetFullPath(Path.Combine(dataDirectory, "updates"));
+        string stagedPath = Path.GetFullPath(stagedExecutable);
+        if (!stagedPath.StartsWith(updateDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(stagedPath))
+        {
+            throw new InvalidDataException("The staged application update is missing or outside the update folder.");
+        }
+
+        using (FileStream update = File.OpenRead(stagedPath))
+        {
+            if (update.ReadByte() != 'M' || update.ReadByte() != 'Z')
+            {
+                throw new InvalidDataException("The staged update is not a valid Windows application.");
+            }
+        }
+
+        string targetPath = Assembly.GetExecutingAssembly().Location;
+        string helperPath = Path.Combine(Path.GetTempPath(), "EduPortal-self-update-" + Guid.NewGuid().ToString("N") + ".ps1");
+        string script =
+            "$ErrorActionPreference = 'Stop'\n"
+            + "$launcherPid = " + Process.GetCurrentProcess().Id + "\n"
+            + "$target = " + PowerShellQuote(targetPath) + "\n"
+            + "$staged = " + PowerShellQuote(stagedPath) + "\n"
+            + "$replacement = $target + '.new'\n"
+            + "try {\n"
+            + "  while (Get-Process -Id $launcherPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 250 }\n"
+            + "  Copy-Item -LiteralPath $staged -Destination $replacement -Force\n"
+            + "  [System.IO.File]::Replace($replacement, $target, $null)\n"
+            + "  Start-Process -FilePath $target\n"
+            + "} catch {\n"
+            + "  Add-Type -AssemblyName System.Windows.Forms\n"
+            + "  [System.Windows.Forms.MessageBox]::Show('EduPortal could not finish installing the update.'"
+            + " + [Environment]::NewLine + [Environment]::NewLine + $_.Exception.Message,"
+            + " 'EduPortal update', 'OK', 'Error') | Out-Null\n"
+            + "} finally {\n"
+            + "  Remove-Item -LiteralPath $replacement -Force -ErrorAction SilentlyContinue\n"
+            + "  Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue\n"
+            + "  Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\n"
+            + "}\n";
+        File.WriteAllText(helperPath, script);
+        try
+        {
+            ProcessStartInfo startInfo = new ProcessStartInfo();
+            startInfo.FileName = "powershell.exe";
+            startInfo.Arguments = "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File " + QuoteArgument(helperPath);
+            startInfo.UseShellExecute = false;
+            startInfo.CreateNoWindow = true;
+            if (Process.Start(startInfo) == null)
+            {
+                throw new InvalidOperationException("The update installer could not be started.");
+            }
+        }
+        catch
+        {
+            File.Delete(helperPath);
+            throw;
+        }
+    }
+
+    private static string PowerShellQuote(string value)
+    {
+        return "'" + value.Replace("'", "''") + "'";
+    }
+
+    private static string QuoteArgument(string value)
+    {
+        StringBuilder quoted = new StringBuilder();
+        quoted.Append('"');
+        int backslashes = 0;
+        foreach (char character in value)
+        {
+            if (character == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+            if (character == '"')
+            {
+                quoted.Append('\\', backslashes * 2 + 1);
+                quoted.Append('"');
+            }
+            else
+            {
+                quoted.Append('\\', backslashes);
+                quoted.Append(character);
+            }
+            backslashes = 0;
+        }
+        quoted.Append('\\', backslashes * 2);
+        quoted.Append('"');
+        return quoted.ToString();
     }
 
     private static void ShowCleanupWarning(string appDirectory, Exception exception)
