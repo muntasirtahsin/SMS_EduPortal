@@ -51,6 +51,11 @@ internal static class Program
             startInfo.CreateNoWindow = true;
             startInfo.EnvironmentVariables["EDUPORTAL_DATA_DIR"] = dataDirectory;
             startInfo.EnvironmentVariables["EDUPORTAL_LAUNCHER_CONTROL"] = controlPath;
+            string startupReadyFile = Environment.GetEnvironmentVariable("EDUPORTAL_UPDATE_READY_FILE");
+            if (!String.IsNullOrEmpty(startupReadyFile))
+            {
+                startInfo.EnvironmentVariables["EDUPORTAL_UPDATE_READY_FILE"] = startupReadyFile;
+            }
             using (Process process = Process.Start(startInfo))
             {
                 if (process == null)
@@ -73,6 +78,18 @@ internal static class Program
         }
         catch (Exception exception)
         {
+            if (dataDirectory != null)
+            {
+                try
+                {
+                    File.AppendAllText(
+                        Path.Combine(dataDirectory, "launcher-error.log"),
+                        DateTime.Now.ToString("s") + " " + exception + Environment.NewLine);
+                }
+                catch (IOException)
+                {
+                }
+            }
             MessageBox.Show(
                 "EduPortal could not start.\n\n" + exception.Message,
                 "EduPortal",
@@ -261,6 +278,7 @@ internal static class Program
             + "$backup = $target + '.backup-' + [Guid]::NewGuid().ToString('N')\n"
             + "$failed = $target + '.failed-' + [Guid]::NewGuid().ToString('N')\n"
             + "$log = Join-Path $env:LOCALAPPDATA 'EduPortal\\update-error.log'\n"
+            + "$ready = Join-Path (Join-Path $env:LOCALAPPDATA 'EduPortal\\updates') ('launcher-ready-' + [Guid]::NewGuid().ToString('N') + '.txt')\n"
             + "function Write-UpdateLog($message) {\n"
             + "  Add-Content -LiteralPath $log -Value ((Get-Date).ToString('s') + ' ' + $message)\n"
             + "}\n"
@@ -282,11 +300,21 @@ internal static class Program
             + "  }\n"
             + "  if (-not $replaced) { throw 'Could not replace the application executable.' }\n"
             + "  Write-UpdateLog 'Updated executable installed; restarting EduPortal.'\n"
-            + "  $newProcess = Start-Process -FilePath $target -WorkingDirectory (Split-Path -Parent $target) -PassThru\n"
-            + "  Start-Sleep -Seconds 5\n"
-            + "  $newProcess.Refresh()\n"
-            + "  if ($newProcess.HasExited) { throw 'The updated launcher exited during startup.' }\n"
-            + "  Write-UpdateLog ('Restart succeeded with process ' + $newProcess.Id + '.')\n"
+            + "  $startInfo = New-Object System.Diagnostics.ProcessStartInfo\n"
+            + "  $startInfo.FileName = $target\n"
+            + "  $startInfo.WorkingDirectory = Split-Path -Parent $target\n"
+            + "  $startInfo.UseShellExecute = $false\n"
+            + "  $startInfo.EnvironmentVariables['EDUPORTAL_UPDATE_READY_FILE'] = $ready\n"
+            + "  $newProcess = [System.Diagnostics.Process]::Start($startInfo)\n"
+            + "  if (-not $newProcess) { throw 'Windows did not start the updated launcher.' }\n"
+            + "  $deadline = (Get-Date).AddSeconds(30)\n"
+            + "  while (-not (Test-Path -LiteralPath $ready -PathType Leaf)) {\n"
+            + "    $newProcess.Refresh()\n"
+            + "    if ($newProcess.HasExited) { throw ('Updated launcher exited during startup with code ' + $newProcess.ExitCode + '.') }\n"
+            + "    if ((Get-Date) -ge $deadline) { throw 'The updated application did not signal that its window opened within 30 seconds.' }\n"
+            + "    Start-Sleep -Milliseconds 250\n"
+            + "  }\n"
+            + "  Write-UpdateLog ('Updated application window opened; launcher process ' + $newProcess.Id + '.')\n"
             + "  Remove-Item -LiteralPath $backup -Force\n"
             + "} catch {\n"
             + "  $failure = $_.Exception.Message\n"
@@ -316,6 +344,7 @@ internal static class Program
             + "} finally {\n"
             + "  Remove-Item -LiteralPath $replacement -Force -ErrorAction SilentlyContinue\n"
             + "  Remove-Item -LiteralPath $failed -Force -ErrorAction SilentlyContinue\n"
+            + "  Remove-Item -LiteralPath $ready -Force -ErrorAction SilentlyContinue\n"
             + "  if (-not (Test-Path -LiteralPath $backup)) { Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue }\n"
             + "  Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\n"
             + "}\n";

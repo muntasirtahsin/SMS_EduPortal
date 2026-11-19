@@ -33,9 +33,13 @@ public class Main {
             StringWriter sw = new StringWriter();
             t.printStackTrace(new PrintWriter(sw));
             String errDetails = sw.toString();
+            String dataDirectory = System.getenv("EDUPORTAL_DATA_DIR");
+            Path logPath = dataDirectory == null || dataDirectory.isBlank()
+                    ? Path.of("error.log")
+                    : Path.of(dataDirectory, "error.log");
 
             Files.writeString(
-                Path.of("error.log"),
+                logPath,
                 "[" + java.time.LocalDateTime.now() + "] " + title + ":\n" + errDetails + "\n\n",
                 StandardOpenOption.CREATE,
                 StandardOpenOption.APPEND
@@ -43,7 +47,7 @@ public class Main {
 
             JOptionPane.showMessageDialog(
                 null,
-                title + ":\n" + t.toString() + "\n\nPlease check error.log for details.",
+                title + ":\n" + t.toString() + "\n\nPlease check " + logPath + " for details.",
                 "EduPortal Error",
                 JOptionPane.ERROR_MESSAGE
             );
