@@ -51,22 +51,45 @@ internal static class Program
             startInfo.CreateNoWindow = true;
             startInfo.EnvironmentVariables["EDUPORTAL_DATA_DIR"] = dataDirectory;
             startInfo.EnvironmentVariables["EDUPORTAL_LAUNCHER_CONTROL"] = controlPath;
+            string javaOutputPath = Path.Combine(dataDirectory, "java-output.log");
             string startupReadyFile = Environment.GetEnvironmentVariable("EDUPORTAL_UPDATE_READY_FILE");
             if (!String.IsNullOrEmpty(startupReadyFile))
             {
                 startInfo.EnvironmentVariables["EDUPORTAL_UPDATE_READY_FILE"] = startupReadyFile;
             }
-            using (Process process = Process.Start(startInfo))
+            startInfo.RedirectStandardOutput = true;
+            startInfo.RedirectStandardError = true;
+            using (StreamWriter javaOutput = new StreamWriter(javaOutputPath, true))
+            using (StreamWriter javaError = new StreamWriter(Path.Combine(dataDirectory, "java-error.log"), true))
+            using (Process process = new Process())
             {
-                if (process == null)
+                javaOutput.AutoFlush = true;
+                javaError.AutoFlush = true;
+                process.StartInfo = startInfo;
+                process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs)
+                {
+                    if (eventArgs.Data != null) javaOutput.WriteLine(eventArgs.Data);
+                };
+                process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs)
+                {
+                    if (eventArgs.Data != null) javaError.WriteLine(eventArgs.Data);
+                };
+                if (!process.Start())
                 {
                     throw new InvalidOperationException("The bundled Java runtime could not be started.");
                 }
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
                 if (!File.Exists(updateMarker))
                 {
                     File.WriteAllText(controlPath, process.Id.ToString());
                 }
                 WaitForApplicationExit(process.Id, controlPath, updateMarker);
+                process.WaitForExit();
+                File.AppendAllText(
+                    Path.Combine(dataDirectory, "launcher-error.log"),
+                    DateTime.Now.ToString("s") + " Java process " + process.Id
+                        + " exited with code " + process.ExitCode + Environment.NewLine);
                 applicationExited = true;
             }
             if (File.Exists(executableUpdateMarker))
@@ -310,7 +333,7 @@ internal static class Program
             + "  $deadline = (Get-Date).AddSeconds(30)\n"
             + "  while (-not (Test-Path -LiteralPath $ready -PathType Leaf)) {\n"
             + "    $newProcess.Refresh()\n"
-            + "    if ($newProcess.HasExited) { throw ('Updated launcher exited during startup with code ' + $newProcess.ExitCode + '.') }\n"
+            + "    if ($newProcess.HasExited -and $newProcess.ExitCode -ne 0) { throw ('Updated launcher exited during startup with code ' + $newProcess.ExitCode + '.') }\n"
             + "    if ((Get-Date) -ge $deadline) { throw 'The updated application did not signal that its window opened within 30 seconds.' }\n"
             + "    Start-Sleep -Milliseconds 250\n"
             + "  }\n"
